@@ -8,6 +8,15 @@ let resourcePaths;
 
 async function getPdfjs() {
   if (!pdfjsPromise) {
+    // pdfjs-dist 4.x 依赖 Promise.withResolvers（Node 22+ 才有），低版本运行时先补齐
+    if (typeof Promise.withResolvers !== 'function') {
+      Promise.withResolvers = function withResolvers() {
+        let resolve;
+        let reject;
+        const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+        return { promise, resolve, reject };
+      };
+    }
     pdfjsPromise = import('pdfjs-dist/legacy/build/pdf.mjs');
     try {
       const require = createRequire(import.meta.url);
@@ -55,12 +64,11 @@ function pageItemsToText(items) {
 }
 
 /** 逐页提取 PDF 文本，输出 [Page N] 分页文本。扫描件无文本层时明确报错。 */
-export async function parsePdf(filePath, { maxChars = 2_000_000 } = {}) {
+export async function parsePdf(filePath, { maxChars = 2_000_000, recognize } = {}) {
   const pdfjs = await getPdfjs();
-  const data = new Uint8Array(await fs.readFile(filePath));
-
   let doc;
   try {
+    const data = new Uint8Array(await fs.readFile(filePath));
     const loadingTask = pdfjs.getDocument({
       data,
       useSystemFonts: true,
@@ -72,10 +80,11 @@ export async function parsePdf(filePath, { maxChars = 2_000_000 } = {}) {
     });
     doc = await loadingTask.promise;
   } catch (err) {
+    const detail = String(err?.message || err?.name || '未知错误').slice(0, 160);
     const wrapped = new Error(
       /password/i.test(String(err?.name || err?.message))
-        ? 'PDF 已加密，无法提取文字'
-        : 'PDF 文件已损坏或无法读取',
+        ? `PDF 已加密，无法提取文字（${detail}）`
+        : `PDF 文件已损坏或无法读取（${detail}）`,
     );
     wrapped.code = 'CORRUPT_PDF';
     wrapped.cause = err;
@@ -88,7 +97,19 @@ export async function parsePdf(filePath, { maxChars = 2_000_000 } = {}) {
     for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
       const page = await doc.getPage(pageNumber);
       const content = await page.getTextContent();
-      const text = pageItemsToText(content.items);
+      let text = pageItemsToText(content.items);
+      if (recognize && (!text || (await page.getOperatorList()).fnArray.some((operation) => [
+        pdfjs.OPS.paintImageXObject, pdfjs.OPS.paintInlineImageXObject, pdfjs.OPS.paintImageMaskXObject,
+      ].includes(operation)))) {
+        const size = page.getViewport({ scale: 1 });
+        const viewport = page.getViewport({ scale: Math.min(2, 2000 / Math.max(size.width, size.height)) });
+        const surface = doc.canvasFactory.create(Math.ceil(viewport.width), Math.ceil(viewport.height));
+        try {
+          await page.render({ canvasContext: surface.context, viewport }).promise;
+          const recognized = await recognize(surface.canvas.toBuffer('image/png'));
+          if (recognized && recognized !== text) text = [text, recognized].filter(Boolean).join('\n');
+        } finally { doc.canvasFactory.destroy(surface); }
+      }
       page.cleanup();
       if (!text) continue;
       textLength += text.length;
@@ -101,7 +122,7 @@ export async function parsePdf(filePath, { maxChars = 2_000_000 } = {}) {
     }
 
     if (!pages.length) {
-      const err = new Error('这份 PDF 没有文本层（可能是扫描件），暂不支持 OCR');
+      const err = new Error('这份 PDF 没有文本层（可能是扫描件），请检查扫描件清晰度或启用 OCR');
       err.code = 'NO_TEXT';
       throw err;
     }
