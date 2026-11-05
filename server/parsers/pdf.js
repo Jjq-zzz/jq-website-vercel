@@ -17,7 +17,11 @@ async function getPdfjs() {
         return { promise, resolve, reject };
       };
     }
-    pdfjsPromise = import('pdfjs-dist/legacy/build/pdf.mjs');
+    // PDF.js 通过变量路径加载 worker，显式导入使 Vercel 能追踪这个依赖。
+    pdfjsPromise = Promise.all([
+      import('pdfjs-dist/legacy/build/pdf.mjs'),
+      import('pdfjs-dist/legacy/build/pdf.worker.mjs'),
+    ]).then(([pdfjs]) => pdfjs);
     try {
       const require = createRequire(import.meta.url);
       const pkgPath = require.resolve('pdfjs-dist/package.json');
