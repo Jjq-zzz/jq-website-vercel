@@ -85,7 +85,7 @@ P1 的手动编辑、Mermaid、自动出题、分享只保留扩展位置，见 
 
 ## 格式兼容
 
-前后端及 ZIP 共用 `shared/file-formats.js`，目前共 42 种扩展名。模板及宏文档只读取可见文本，不执行宏、公式或脚本。
+前后端及 ZIP 共用 `shared/file-formats.js`，支持文档和常见图片。表格保留公式源表达式，结构化数学公式以 LaTeX 文本输出，不执行宏、公式或脚本。
 
 | 类型 | 可上传扩展名 |
 | --- | --- |
@@ -194,3 +194,5 @@ npm run set-password -- "小林"
 按提示输入两次 8–128 字符的密码，输入不会显示。此命令也可由站点管理员重置密码，并撤销该账号已有会话。不要把密码直接写在命令行或提交到项目文件。新用户在登录页点击“第一次使用？创建账号”，设置昵称、密码和确认密码即可。正式部署应通过 HTTPS 访问。
 
 Cloudflare 部署支持用户级 BYOK，完整 GitHub 上传与首次部署步骤见 [Cloudflare 部署教程](docs/cloudflare-deployment.md)。
+
+本地图片文字识别使用 Tesseract.js。将官方压缩语言文件（如 eng.traineddata.gz、chi_sim.traineddata.gz）放到同一目录，在服务环境设置 OCR_LANG_PATH 指向该目录，OCR_LANGUAGES 可设为 eng+chi_sim（默认 eng）。可处理 PNG、JPEG、WebP、BMP、扫描 PDF 和可提取的文档内嵌图片。每份文件最多识别 12 张图，每张不超过 5 MB。OCR 输出为可读文字，不保证恢复图片公式的二维结构。
